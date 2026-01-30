@@ -7,6 +7,7 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.LibraryMusic
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.PersonOutline
+import androidx.compose.material.icons.outlined.Radio // Add this import
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -24,6 +25,7 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     object Search : Screen("search", "Search", Icons.Outlined.Search)
 
     object More : Screen("more", "More", Icons.Outlined.MoreHoriz)
+    object Radio : Screen("radio", "Radio", Icons.Outlined.Radio) // Add this line
     object Downloads : Screen("downloads", "Downloads", Icons.Outlined.Download)
     object Settings : Screen("settings", "Settings", Icons.Outlined.Settings)
 }

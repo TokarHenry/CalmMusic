@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -26,7 +27,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,20 +57,21 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.navigation.NavDestination
 import androidx.navigation.NavGraphBuilder
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -87,6 +95,7 @@ import com.calmapps.calmmusic.ui.PlaylistEditScreen
 import com.calmapps.calmmusic.ui.PlaylistItem
 import com.calmapps.calmmusic.ui.PlaylistUiModel
 import com.calmapps.calmmusic.ui.PlaylistsScreen
+import com.calmapps.calmmusic.ui.RadioScreen
 import com.calmapps.calmmusic.ui.SearchScreen
 import com.calmapps.calmmusic.ui.SettingsScreen
 import com.calmapps.calmmusic.ui.SongUiModel
@@ -179,6 +188,9 @@ fun CalmMusic(app: CalmMusic) {
 
     var localMediaController by remember { mutableStateOf<MediaController?>(null) }
     var lastCompletedDownloadUUIDs by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    val externalMediaState by ExternalMediaRepository.mediaState.collectAsState()
+    val showExternalControls = externalMediaState.hasActiveSession && playbackState.nowPlayingSong == null
 
     LaunchedEffect(downloadStatuses) {
         // Filter only completed downloads
@@ -684,17 +696,21 @@ fun CalmMusic(app: CalmMusic) {
 
     LaunchedEffect(Unit) {
         val context = appContext
-        val sessionToken = SessionToken(
-            context,
-            ComponentName(context, PlaybackService::class.java)
-        )
-        val future = MediaController.Builder(context, sessionToken).buildAsync()
-        future.addListener({
-            try {
-                localMediaController = future.get()
-            } catch (_: Exception) {
-            }
-        }, ContextCompat.getMainExecutor(context))
+        try {
+            val sessionToken = SessionToken(
+                context,
+                ComponentName(context, PlaybackService::class.java)
+            )
+            val future = MediaController.Builder(context, sessionToken).buildAsync()
+            future.addListener({
+                try {
+                    localMediaController = future.get()
+                } catch (_: Exception) {
+                }
+            }, ContextCompat.getMainExecutor(context))
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Failed to connect to PlaybackService", e)
+        }
     }
 
     LaunchedEffect(localMediaController) {
@@ -1255,11 +1271,15 @@ fun CalmMusic(app: CalmMusic) {
                     )
                 }
 
-                // New "More" Screen
                 composable(Screen.More.route) {
                     MoreScreen(
                         onNavigateToDownloads = {
                             navController.navigate(Screen.Downloads.route) {
+                                launchSingleTop = true
+                            }
+                        },
+                        onNavigateToRadio = {
+                            navController.navigate(Screen.Radio.route) {
                                 launchSingleTop = true
                             }
                         },
@@ -1269,6 +1289,12 @@ fun CalmMusic(app: CalmMusic) {
                                 launchSingleTop = true
                             }
                         },
+                    )
+                }
+
+                composable(Screen.Radio.route) {
+                    RadioScreen(
+                        onNavigateBack = { navController.popBackStack() }
                     )
                 }
 
@@ -1378,6 +1404,17 @@ fun CalmMusic(app: CalmMusic) {
                         localScanDeletedMissing = localScanDeletedMissing,
                     )
                 }
+            }
+        }
+
+        if (showExternalControls) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 80.dp) // Adjusted to sit above the bottom navigation bar
+                    .padding(horizontal = 16.dp)
+            ) {
+                ExternalMediaWidget(externalMediaState)
             }
         }
 
@@ -1862,6 +1899,80 @@ fun CalmMusic(app: CalmMusic) {
 }
 
 @Composable
+fun ExternalMediaWidget(state: ExternalMediaState) {
+    val context = LocalContext.current
+    if (!isNotificationServiceEnabled(context)) {
+        Box(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
+            ButtonMMD(
+                onClick = {
+                    val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(8.dp)
+            ) {
+                TextMMD("Tap to Enable Music Control", fontSize = 14.sp)
+            }
+        }
+    } else {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Playing on ${state.packageName}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = state.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = state.artist,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(24.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { ExternalMediaRepository.skipToPrevious() }) {
+                        Icon(Icons.Default.SkipPrevious, "Prev")
+                    }
+
+                    androidx.compose.material3.FilledIconButton(onClick = { ExternalMediaRepository.togglePlayPause() }) {
+                        Icon(if(state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, "Play")
+                    }
+
+                    IconButton(onClick = { ExternalMediaRepository.skipToNext() }) {
+                        Icon(Icons.Default.SkipNext, "Next")
+                    }
+                }
+            }
+        }
+    }
+}
+
+fun isNotificationServiceEnabled(context: android.content.Context): Boolean {
+    val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
+    return flat != null && flat.contains(context.packageName)
+}
+
+@Composable
 fun getAppBarTitle(currentDestination: NavDestination?): String {
     return when {
         currentDestination?.route == Screen.Playlists.route -> "Playlists"
@@ -1872,6 +1983,7 @@ fun getAppBarTitle(currentDestination: NavDestination?): String {
         currentDestination?.route == Screen.ArtistDetails.route -> "Artist"
         currentDestination?.route == Screen.Search.route -> "Search"
         currentDestination?.route == Screen.More.route -> "More"
+        currentDestination?.route == Screen.Radio.route -> "Radio"
         currentDestination?.route == Screen.Downloads.route -> "Downloads"
         currentDestination?.route == Screen.Settings.route -> "Settings"
         currentDestination?.route == Screen.PlaylistEdit.route -> "Edit Playlist"
