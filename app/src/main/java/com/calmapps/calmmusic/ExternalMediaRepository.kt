@@ -27,10 +27,11 @@ object ExternalMediaRepository {
         get() = _mediaState.value
 
     private var activeController: MediaController? = null
-
     private var rawActionPrevious: PendingIntent? = null
     private var rawActionPlayPause: PendingIntent? = null
     private var rawActionNext: PendingIntent? = null
+
+    var notificationCanceller: ((String) -> Unit)? = null
 
     private val callback = object : MediaController.Callback() {
         override fun onPlaybackStateChanged(state: PlaybackState?) {
@@ -45,7 +46,7 @@ object ExternalMediaRepository {
     }
 
     fun updateController(controller: MediaController?) {
-        clearRawActions() // Reset raw actions when switching modes
+        clearRawActions()
         activeController?.unregisterCallback(callback)
         activeController = controller
 

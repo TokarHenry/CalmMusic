@@ -132,19 +132,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        // Mark the app as foreground whenever MainActivity becomes visible
         app.playbackStateManager.setAppForegroundState(true)
     }
 
     override fun onStop() {
         super.onStop()
-        // Mark the app as background when MainActivity is no longer visible
         app.playbackStateManager.setAppForegroundState(false)
     }
 
     override fun onResume() {
         super.onResume()
-        // Ensure foreground state is correct when activity is resumed
         app.playbackStateManager.setAppForegroundState(true)
     }
 
@@ -155,6 +152,11 @@ class MainActivity : ComponentActivity() {
         if (requestCode == REQUEST_CODE_APPLE_MUSIC_AUTH && resultCode == RESULT_OK) {
             app.appleMusicAuthManager.handleAuthResult(data)
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
     }
 
     companion object {
@@ -193,26 +195,19 @@ fun CalmMusic(app: CalmMusic) {
     val showExternalControls = externalMediaState.hasActiveSession && playbackState.nowPlayingSong == null
 
     LaunchedEffect(downloadStatuses) {
-        // Filter only completed downloads
         val currentCompletedDownloads = downloadStatuses
             .filter { it.state == YouTubeDownloadStatus.State.COMPLETED }
 
-        // Get the set of UUIDs for currently completed downloads
         val currentCompletedUUIDs = currentCompletedDownloads.map { it.id }.toSet()
-
-        // Find which UUIDs are new since the last check
         val newCompletedUUIDs = currentCompletedUUIDs - lastCompletedDownloadUUIDs
 
         if (newCompletedUUIDs.isNotEmpty()) {
-            // 1. Refresh the library to pick up new database entries
             viewModel.refreshLibraryFromDatabase()
 
-            // 2. Identify the actual Song IDs (Video IDs) for the newly finished downloads
             val newSongIds = currentCompletedDownloads
                 .filter { it.id in newCompletedUUIDs }
                 .map { it.songId }
 
-            // 3. Notify ViewModel to hot-swap playback
             newSongIds.forEach { songId ->
                 viewModel.onSongDownloaded(songId, localMediaController)
             }
@@ -247,6 +242,15 @@ fun CalmMusic(app: CalmMusic) {
             if (event == Lifecycle.Event.ON_RESUME) {
                 hasOverlayPermission = Settings.canDrawOverlays(context)
                 updateBatteryOptimizationState()
+
+                val intent = activity?.intent
+                val fromRadio = intent?.getBooleanExtra("FROM_RADIO_TUNER", false) ?: false
+                if (fromRadio) {
+                    if (viewModel.playbackState.value.isPlaybackPlaying) {
+                        viewModel.togglePlayback(localMediaController)
+                    }
+                    intent?.removeExtra("FROM_RADIO_TUNER")
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -271,8 +275,6 @@ fun CalmMusic(app: CalmMusic) {
     val playlistsViewModel: PlaylistsViewModel = viewModel(factory = PlaylistsViewModel.factory(app))
 
     val overlayState by app.playbackStateManager.state.collectAsState()
-
-    // Bottom sheet states
     val addToPlaylistSheetState: SheetStateMMD = rememberModalBottomSheetMMDState(
         skipPartiallyExpanded = true,
     )
@@ -341,7 +343,6 @@ fun CalmMusic(app: CalmMusic) {
     var songToAddToPlaylist by remember { mutableStateOf<SongUiModel?>(null) }
     var pendingAddToNewPlaylistSong by remember { mutableStateOf<SongUiModel?>(null) }
 
-    // Search state
     var searchQuery by remember { mutableStateOf("") }
     var searchSongs by remember { mutableStateOf<List<SongUiModel>>(emptyList()) }
     var searchAlbums by remember { mutableStateOf<List<AlbumUiModel>>(emptyList()) }
@@ -350,7 +351,6 @@ fun CalmMusic(app: CalmMusic) {
     var isSearching by remember { mutableStateOf(false) }
     var searchError by remember { mutableStateOf<String?>(null) }
 
-    // Scanning state
     var isRescanningLocal by remember { mutableStateOf(false) }
     var localScanProgress by remember { mutableStateOf(0f) }
     var isIngestingLocal by remember { mutableStateOf(false) }
@@ -904,7 +904,6 @@ fun CalmMusic(app: CalmMusic) {
                         val songs = playlistsViewModel.getPlaylistSongs(id)
                         existingIds = songs.map { it.id }.toSet()
                     } catch (_: Exception) {
-                        // existingIds remains empty
                     }
                 }
             }
@@ -1294,7 +1293,9 @@ fun CalmMusic(app: CalmMusic) {
 
                 composable(Screen.Radio.route) {
                     RadioScreen(
-                        onNavigateBack = { navController.popBackStack() }
+                        onNavigateBack = { navController.popBackStack() },
+                        onPausePlayback = { viewModel.togglePlayback(localMediaController) },
+                        isAppPlaying = playbackState.isPlaybackPlaying
                     )
                 }
 
@@ -1411,7 +1412,7 @@ fun CalmMusic(app: CalmMusic) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 80.dp) // Adjusted to sit above the bottom navigation bar
+                    .padding(bottom = 80.dp)
                     .padding(horizontal = 16.dp)
             ) {
                 ExternalMediaWidget(externalMediaState)

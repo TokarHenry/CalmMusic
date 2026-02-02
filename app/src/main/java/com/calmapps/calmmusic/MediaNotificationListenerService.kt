@@ -23,11 +23,26 @@ class MediaNotificationListenerService : NotificationListenerService() {
     override fun onCreate() {
         super.onCreate()
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+        ExternalMediaRepository.notificationCanceller = { targetPackage ->
+            cancelNotificationsForPackage(targetPackage)
+        }
     }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
         scanForActiveMedia()
+    }
+
+    private fun cancelNotificationsForPackage(packageName: String) {
+        try {
+            val notifications = activeNotifications
+            notifications.filter { it.packageName == packageName }.forEach { sbn ->
+                cancelNotification(sbn.key)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to cancel notification for $packageName", e)
+        }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -46,7 +61,7 @@ class MediaNotificationListenerService : NotificationListenerService() {
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
-        if (sbn.packageName == ExternalMediaRepository.value.packageName) {
+        if (sbn.packageName == ExternalMediaRepository.value.packageName || RADIO_PACKAGES.contains(sbn.packageName)) {
             ExternalMediaRepository.clear()
             stopPolling()
             scanForActiveMedia()
@@ -129,12 +144,11 @@ class MediaNotificationListenerService : NotificationListenerService() {
                     if (value > 1000) {
                         return "${value / 100}.${(value % 100) / 10}" // 10330 -> 103.3
                     } else if (value > 0) {
-                        return "$value" // Fallback
+                        return "$value"
                     }
                 }
             }
-        } catch (e: Exception) {
-            // Ignore permission/system errors
+        } catch (_: Exception) {
         }
         return null
     }

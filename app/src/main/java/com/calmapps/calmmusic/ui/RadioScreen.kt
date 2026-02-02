@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
+import android.text.TextUtils
 import android.view.KeyEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -11,12 +12,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
 import androidx.compose.material3.Icon
@@ -31,25 +28,120 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.calmapps.calmmusic.ExternalMediaRepository
+import com.calmapps.calmmusic.ExternalMediaState
+import com.calmapps.calmmusic.CalmMusicAccessibilityService
 import com.mudita.mmd.components.text.TextMMD
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.DecimalFormat
 
+enum class RadioCommand { NEXT, PREVIOUS, TOGGLE_POWER, STOP, FORCE_PLAY }
+
 @Composable
-fun RadioScreen(onNavigateBack: () -> Unit) {
+fun RadioScreen(
+    onNavigateBack: () -> Unit,
+    onPausePlayback: () -> Unit,
+    isAppPlaying: Boolean
+) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val mediaState by ExternalMediaRepository.mediaState.collectAsState()
 
     val isRadioActive = mediaState.packageName.contains("radio", ignoreCase = true) ||
             mediaState.packageName.contains("fm", ignoreCase = true)
 
-    val targetPackage = if (isRadioActive && mediaState.packageName.isNotBlank())
-        mediaState.packageName else "com.android.fmradio"
+    if (!isRadioActive) {
+        EmptyRadioState(
+            onPowerOn = {
+                if (!isAccessibilityServiceEnabled(context, CalmMusicAccessibilityService::class.java)) {
+                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                } else {
+                    scope.launch {
+                        val packageName = findRadioPackage(context)
+                        if (packageName != null) {
+                            if (isAppPlaying) onPausePlayback()
 
+                            launchSystemRadioApp(context, packageName)
+
+                            delay(5000)
+                            val myIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                            myIntent?.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                            myIntent?.putExtra("FROM_RADIO_TUNER", true)
+                            context.startActivity(myIntent)
+                        }
+                    }
+                }
+            }
+        )
+    } else {
+        ActiveRadioState(
+            context = context,
+            mediaState = mediaState,
+            targetPackage = mediaState.packageName
+        )
+    }
+}
+
+fun isAccessibilityServiceEnabled(context: Context, serviceClass: Class<*>): Boolean {
+    val expectedComponentName = ComponentName(context, serviceClass)
+    val enabledServicesSetting = Settings.Secure.getString(
+        context.contentResolver,
+        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+    ) ?: return false
+
+    val splitter = TextUtils.SimpleStringSplitter(':')
+    splitter.setString(enabledServicesSetting)
+    while (splitter.hasNext()) {
+        val componentNameString = splitter.next()
+        val enabledComponent = ComponentName.unflattenFromString(componentNameString)
+        if (enabledComponent != null && enabledComponent == expectedComponentName) {
+            return true
+        }
+    }
+    return false
+}
+
+@Composable
+fun EmptyRadioState(onPowerOn: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(120.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primaryContainer)
+                .clickable { onPowerOn() },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.PowerSettingsNew,
+                "Turn On Radio",
+                modifier = Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
+        Spacer(modifier = Modifier.height(24.dp))
+        TextMMD("Turn on FM Radio", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(8.dp))
+        TextMMD("Tap to launch tuner", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+    }
+}
+
+@Composable
+fun ActiveRadioState(
+    context: Context,
+    mediaState: ExternalMediaState,
+    targetPackage: String
+) {
     var systemFrequency by remember { mutableStateOf<Float?>(null) }
     var isScanning by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
-    // Timeout
     LaunchedEffect(isScanning) {
         if (isScanning) {
             delay(10000)
@@ -78,10 +170,7 @@ fun RadioScreen(onNavigateBack: () -> Unit) {
                 break
             }
         }
-
-        if (!foundMatch) {
-            systemFrequency = null
-        }
+        if (!foundMatch) systemFrequency = null
     }
 
     Column(
@@ -93,7 +182,7 @@ fun RadioScreen(onNavigateBack: () -> Unit) {
             if (!isNotificationListenerEnabled(context)) {
                 Spacer(modifier = Modifier.height(16.dp))
                 PermissionWarning(context)
-            } else if (isRadioActive && !mediaState.title.contains("FM Radio", ignoreCase = true)) {
+            } else if (!mediaState.title.contains("FM Radio", ignoreCase = true)) {
                 Spacer(modifier = Modifier.height(8.dp))
                 if (!mediaState.title.matches(Regex(".*\\d{2,3}.*"))) {
                     TextMMD(mediaState.title, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
@@ -105,55 +194,47 @@ fun RadioScreen(onNavigateBack: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
                 IconButton(onClick = {
                     isScanning = true
-                    performCommand(context, RadioCommand.PREVIOUS, targetPackage, mediaState.isRawNotification)
+                    performCommand(context, RadioCommand.PREVIOUS, targetPackage)
                 }, modifier = Modifier.size(64.dp)) {
-                    Icon(
-                        Icons.Outlined.SkipPrevious,
-                        "Scan Down",
-                        modifier = Modifier.size(48.dp)
-                    )
+                    Icon(Icons.Outlined.SkipPrevious, "Scan Down", modifier = Modifier.size(48.dp))
                 }
-
                 Spacer(modifier = Modifier.width(8.dp))
-
                 TextMMD(
-                    text = systemFrequency?.let {
-                        DecimalFormat("0.0").format(it)
-                    } ?: "Unknown",
+                    text = systemFrequency?.let { DecimalFormat("0.0").format(it) } ?: "Unknown",
                     fontSize = 44.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = if(isScanning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                 )
-
                 Spacer(modifier = Modifier.width(8.dp))
-
                 IconButton(onClick = {
                     isScanning = true
-                    performCommand(context, RadioCommand.NEXT, targetPackage, mediaState.isRawNotification)
+                    performCommand(context, RadioCommand.NEXT, targetPackage)
                 }, modifier = Modifier.size(64.dp)) {
-                    Icon(
-                        Icons.Outlined.SkipNext,
-                        "Scan Up",
-                        modifier = Modifier.size(48.dp)
-                    )
+                    Icon(Icons.Outlined.SkipNext, "Scan Up", modifier = Modifier.size(48.dp))
                 }
             }
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(24.dp)) {
-            val isPlaying = isRadioActive && mediaState.isPlaying
-            val centerIcon = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow
-
             Box(
-                modifier = Modifier.size(80.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer)
-                    .clickable { performCommand(context, RadioCommand.TOGGLE_POWER, targetPackage, mediaState.isRawNotification) },
+                modifier = Modifier
+                    .size(120.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .clickable {
+                        performCommand(context, RadioCommand.TOGGLE_POWER, targetPackage)
+                    },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(centerIcon, "Toggle", modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                Icon(
+                    Icons.Default.PowerSettingsNew,
+                    "Turn Off Radio",
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.onErrorContainer
+                )
             }
+            TextMMD("Turn Off FM Radio", fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
-
-        TextMMD("Tap to open system tuner", fontSize = 14.sp, modifier = Modifier.padding(bottom = 24.dp).clickable { launchSystemRadioApp(context, targetPackage) })
     }
 }
 
@@ -175,46 +256,69 @@ private fun isNotificationListenerEnabled(context: Context): Boolean {
     return flat != null && flat.contains(context.packageName)
 }
 
-enum class RadioCommand { NEXT, PREVIOUS, TOGGLE_POWER }
-
-private fun performCommand(context: Context, command: RadioCommand, packageName: String, isRaw: Boolean) {
-    if (isRaw) {
+private fun performCommand(context: Context, command: RadioCommand, packageName: String) {
+    if (ExternalMediaRepository.value.packageName == packageName &&
+        command != RadioCommand.STOP && command != RadioCommand.FORCE_PLAY) {
         when (command) {
-            RadioCommand.NEXT -> { ExternalMediaRepository.skipToNext(); return }
-            RadioCommand.PREVIOUS -> { ExternalMediaRepository.skipToPrevious(); return }
-            RadioCommand.TOGGLE_POWER -> { ExternalMediaRepository.togglePlayPause(); return }
+            RadioCommand.NEXT -> ExternalMediaRepository.skipToNext()
+            RadioCommand.PREVIOUS -> ExternalMediaRepository.skipToPrevious()
+            RadioCommand.TOGGLE_POWER -> ExternalMediaRepository.togglePlayPause()
+            else -> {}
         }
+        return
+    }
+
+    if (command == RadioCommand.STOP) {
+        val offIntents = listOf(
+            "fmradio.turnoff",
+            "com.android.fmradio.turnoff",
+            "fmradio.stop",
+            "com.caf.fmradio.FMOFF"
+        )
+        offIntents.forEach { action ->
+            val intent = Intent(action)
+            intent.setPackage(packageName)
+            context.sendBroadcast(intent)
+        }
+        return
     }
 
     val keyEventCode = when (command) {
         RadioCommand.NEXT -> KeyEvent.KEYCODE_MEDIA_NEXT
         RadioCommand.PREVIOUS -> KeyEvent.KEYCODE_MEDIA_PREVIOUS
         RadioCommand.TOGGLE_POWER -> KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+        RadioCommand.FORCE_PLAY -> KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+        else -> KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
     }
 
-    if (sendTargetedMediaKey(context, keyEventCode, packageName)) return
-
-    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-    audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyEventCode))
-    audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyEventCode))
+    sendTargetedMediaKey(context, keyEventCode, packageName)
 }
 
-private fun sendTargetedMediaKey(context: Context, keyCode: Int, packageName: String): Boolean {
+private fun sendTargetedMediaKey(context: Context, keyCode: Int, packageName: String) {
     val pm = context.packageManager
     val queryIntent = Intent(Intent.ACTION_MEDIA_BUTTON).setPackage(packageName)
     val receivers = pm.queryBroadcastReceivers(queryIntent, 0)
 
+    val intent = Intent(Intent.ACTION_MEDIA_BUTTON)
+    intent.setPackage(packageName)
+
     if (receivers.isNotEmpty()) {
         val receiver = receivers[0]
-        val intent = Intent(Intent.ACTION_MEDIA_BUTTON)
         intent.component = ComponentName(receiver.activityInfo.packageName, receiver.activityInfo.name)
-        intent.putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
-        context.sendBroadcast(intent)
-        intent.putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_UP, keyCode))
-        context.sendBroadcast(intent)
-        return true
     }
-    return false
+
+    intent.putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
+    context.sendBroadcast(intent)
+
+    intent.putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_UP, keyCode))
+    context.sendBroadcast(intent)
+}
+
+private fun findRadioPackage(context: Context): String? {
+    val candidates = listOf("com.android.fmradio", "com.mediatek.fmradio", "com.caf.fmradio")
+    return candidates.firstOrNull {
+        context.packageManager.getLaunchIntentForPackage(it) != null
+    }
 }
 
 private fun launchSystemRadioApp(context: Context, packageName: String) {
@@ -223,3 +327,4 @@ private fun launchSystemRadioApp(context: Context, packageName: String) {
         if (intent != null) context.startActivity(intent)
     } catch (_: Exception) { }
 }
+
