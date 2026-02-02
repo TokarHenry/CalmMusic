@@ -36,6 +36,22 @@ class CalmMusicAccessibilityService : AccessibilityService() {
     }
 
     private fun checkForPlayButton(root: AccessibilityNodeInfo) {
+        // New Check: Look for Next/Previous buttons.
+        // If these exist and are active, we assume the radio is in a playback state
+        // (or at least doesn't need 'Play' pressed), so we bail out.
+        if (areNavigationButtonsActive(root)) {
+            Log.d(TAG, "Navigation buttons (Next/Previous) found and active. Skipping play click.")
+
+            // Reset cooldown so we don't hammer the check immediately
+            lastClickTime = System.currentTimeMillis()
+
+            // Return to main app since our job is effectively done
+            Handler(Looper.getMainLooper()).postDelayed({
+                returnToApp()
+            }, 500)
+            return
+        }
+
         val keywords = listOf("Play", "Start", "Power", "Turn On", "FM Radio")
 
         for (keyword in keywords) {
@@ -61,6 +77,26 @@ class CalmMusicAccessibilityService : AccessibilityService() {
                 }
             }
         }
+    }
+
+    private fun areNavigationButtonsActive(root: AccessibilityNodeInfo): Boolean {
+        // Common keywords for radio navigation
+        val navKeywords = listOf("Next", "Previous", "Forward", "Back")
+
+        for (keyword in navKeywords) {
+            val nodes = root.findAccessibilityNodeInfosByText(keyword)
+            if (!nodes.isNullOrEmpty()) {
+                for (node in nodes) {
+                    // We only count them if they are actually enabled/clickable
+                    // which suggests they are active controls, not just disabled UI elements.
+                    if (node.isEnabled) {
+                        Log.d(TAG, "Found active navigation button: '${node.text ?: node.contentDescription}'")
+                        return true
+                    }
+                }
+            }
+        }
+        return false
     }
 
     private fun returnToApp() {

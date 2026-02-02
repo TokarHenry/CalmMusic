@@ -1,7 +1,6 @@
 package com.calmapps.calmmusic
 
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -27,7 +26,6 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.navigation.NavDestination.Companion.hierarchy
 import com.calmapps.calmmusic.ui.AlbumUiModel
 import com.calmapps.calmmusic.ui.PlaylistUiModel
-import com.calmapps.calmmusic.ui.RepeatMode
 import com.mudita.mmd.components.buttons.ButtonMMD
 import com.mudita.mmd.components.buttons.OutlinedButtonMMD
 import com.mudita.mmd.components.nav_bar.NavigationBarItemMMD
@@ -38,11 +36,6 @@ import com.mudita.mmd.components.top_app_bar.TopAppBarMMD
 import com.mudita.mmd.components.menus.DropdownMenuItemMMD
 import com.mudita.mmd.components.menus.DropdownMenuMMD
 import com.calmapps.calmmusic.ui.DashedDivider
-import androidx.compose.material.icons.automirrored.outlined.QueueMusic
-import androidx.compose.material.icons.outlined.Album
-import androidx.compose.material.icons.outlined.LibraryMusic
-import androidx.compose.material.icons.outlined.MoreHoriz
-import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 
@@ -226,7 +219,7 @@ fun CalmMusicTopAppBar(
 }
 
 @Composable
-private fun RowScope.CalmMusicTopAppBarActions(
+private fun CalmMusicTopAppBarActions(
     currentDestination: NavDestination?,
     isPlaylistsEditMode: Boolean,
     playlistEditSelectionCount: Int,
@@ -346,6 +339,7 @@ private fun RowScope.CalmMusicTopAppBarActions(
     if (
         hasNowPlaying &&
         currentDestination?.route != Screen.PlaylistAddSongs.route &&
+        currentDestination?.route != Screen.Radio.route &&
         !(currentDestination?.route == Screen.Playlists.route && isPlaylistsEditMode) &&
         !(currentDestination?.route == Screen.PlaylistDetails.route && isPlaylistDetailsEditMode)
     ) {

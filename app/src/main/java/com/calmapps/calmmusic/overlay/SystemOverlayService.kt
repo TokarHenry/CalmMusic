@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Close
@@ -49,6 +48,7 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.calmapps.calmmusic.CalmMusic
+import com.calmapps.calmmusic.ExternalMediaRepository
 import com.calmapps.calmmusic.MainActivity
 import com.calmapps.calmmusic.PlaybackService
 import com.calmapps.calmmusic.data.PlaybackStateManager
@@ -77,9 +77,14 @@ class SystemOverlayService : Service() {
 
         serviceScope.launch {
             playbackStateManager.state.collect { state ->
+                val radioState = ExternalMediaRepository.value
+                val isRadioActive = radioState.isPlaying ||
+                        radioState.packageName.contains("radio", ignoreCase = true) ||
+                        radioState.packageName.contains("fm", ignoreCase = true)
+
                 if (state.isAppInForeground) {
                     removeOverlayView()
-                } else if (state.songId != null && overlayView == null) {
+                } else if ((state.songId != null || isRadioActive) && overlayView == null) {
                     showOverlay()
                 }
             }
@@ -125,12 +130,10 @@ class SystemOverlayService : Service() {
             val statusBarHeightPx = if (statusBarResId > 0) {
                 resources.getDimensionPixelSize(statusBarResId)
             } else {
-                (24 * density).toInt() // reasonable fallback
+                (24 * density).toInt()
             }
-            // Place the pill just below the status bar
-            y = statusBarHeightPx + marginPx
 
-            // Remember the "home" position so we can snap back after drag
+            y = statusBarHeightPx + marginPx
             originalX = 0
             originalY = y
 
@@ -172,9 +175,13 @@ class SystemOverlayService : Service() {
     @Composable
     private fun OverlayContent() {
         val state by playbackStateManager.state.collectAsState()
+        val radioState by ExternalMediaRepository.mediaState.collectAsState()
 
-        // Only show if a song is loaded AND the app is in the background
-        val showOverlay = state.songId != null && !state.isAppInForeground
+        val isRadioActive = radioState.isPlaying ||
+                radioState.packageName.contains("radio", ignoreCase = true) ||
+                radioState.packageName.contains("fm", ignoreCase = true)
+
+        val showOverlay = !state.isAppInForeground && (state.songId != null || isRadioActive)
 
         AnimatedVisibility(
             visible = showOverlay,
@@ -209,8 +216,14 @@ class SystemOverlayService : Service() {
                     horizontalArrangement = Arrangement.Center,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
+                    val displayText = if (isRadioActive) {
+                        if (radioState.title.isNotBlank()) radioState.title else "FM Radio"
+                    } else {
+                        state.title.ifBlank { "Not Playing" }
+                    }
+
                     Text(
-                        text = state.title.ifBlank{ "Not Playing" },
+                        text = displayText,
                         color = Color.White,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
@@ -221,8 +234,10 @@ class SystemOverlayService : Service() {
 
                     Spacer(modifier = Modifier.width(8.dp))
 
+                    val isPlaying = if (isRadioActive) radioState.isPlaying else state.isPlaying
+
                     Icon(
-                        imageVector = if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                         contentDescription = null,
                         tint = Color.White,
                         modifier = Modifier.size(20.dp)

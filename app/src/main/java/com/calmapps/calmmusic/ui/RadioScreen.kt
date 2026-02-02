@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -25,11 +26,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.calmapps.calmmusic.ExternalMediaRepository
 import com.calmapps.calmmusic.ExternalMediaState
 import com.calmapps.calmmusic.CalmMusicAccessibilityService
+import com.mudita.mmd.components.bottom_sheet.ModalBottomSheetMMD
+import com.mudita.mmd.components.bottom_sheet.rememberModalBottomSheetMMDState
+import com.mudita.mmd.components.buttons.ButtonMMD
+import com.mudita.mmd.components.buttons.OutlinedButtonMMD
 import com.mudita.mmd.components.text.TextMMD
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -37,6 +43,7 @@ import java.text.DecimalFormat
 
 enum class RadioCommand { NEXT, PREVIOUS, TOGGLE_POWER, STOP, FORCE_PLAY }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RadioScreen(
     onNavigateBack: () -> Unit,
@@ -47,6 +54,9 @@ fun RadioScreen(
     val scope = rememberCoroutineScope()
     val mediaState by ExternalMediaRepository.mediaState.collectAsState()
 
+    var showPermissionSheet by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetMMDState()
+
     val isRadioActive = mediaState.packageName.contains("radio", ignoreCase = true) ||
             mediaState.packageName.contains("fm", ignoreCase = true)
 
@@ -54,9 +64,7 @@ fun RadioScreen(
         EmptyRadioState(
             onPowerOn = {
                 if (!isAccessibilityServiceEnabled(context, CalmMusicAccessibilityService::class.java)) {
-                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(intent)
+                    showPermissionSheet = true
                 } else {
                     scope.launch {
                         val packageName = findRadioPackage(context)
@@ -81,6 +89,60 @@ fun RadioScreen(
             mediaState = mediaState,
             targetPackage = mediaState.packageName
         )
+    }
+
+    if (showPermissionSheet) {
+        ModalBottomSheetMMD(
+            onDismissRequest = { showPermissionSheet = false },
+            sheetState = sheetState
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                TextMMD(
+                    text = "Permission Required",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                TextMMD(
+                    text = "To control the FM Radio tuner, CalmMusic requires the Accessibility Service permission. Please enable 'CalmMusic Helper' in the following settings screen.",
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                ButtonMMD(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(12.dp),
+                    onClick = {
+                        showPermissionSheet = false
+                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(intent)
+                    }
+                ) {
+                    TextMMD("Open Settings", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedButtonMMD(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(12.dp),
+                    onClick = { showPermissionSheet = false }
+                ) {
+                    TextMMD("Cancel", fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
     }
 }
 
@@ -327,4 +389,3 @@ private fun launchSystemRadioApp(context: Context, packageName: String) {
         if (intent != null) context.startActivity(intent)
     } catch (_: Exception) { }
 }
-
