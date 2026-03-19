@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android Auto light theme colors -->
+    <style name="Theme.CalmMusic.Auto" parent="Theme.Material3.Light">
+        <item name="colorPrimary">@color/auto_primary_light</item>
+        <item name="colorOnPrimary">@color/auto_on_primary_light</item>
+        <item name="colorPrimaryContainer">@color/auto_primary_container_light</item>
+        <item name="colorOnPrimaryContainer">@color/auto_on_primary_container_light</item>
+        <item name="colorSurface">@color/auto_surface_light</item>
+        <item name="colorOnSurface">@color/auto_on_surface_light</item>
+        <item name="colorSurfaceVariant">@color/auto_surface_variant_light</item>
+        <item name="colorOnSurfaceVariant">@color/auto_on_surface_variant_light</item>
+    </style>
+
+    <!-- Light mode colors - strict black and white -->
+    <color name="auto_primary_light">#000000</color>
+    <color name="auto_on_primary_light">#FFFFFF</color>
+    <color name="auto_primary_container_light">#FFFFFF</color>
+    <color name="auto_on_primary_container_light">#000000</color>
+    <color name="auto_surface_light">#FFFFFF</color>
+    <color name="auto_on_surface_light">#000000</color>
+    <color name="auto_surface_variant_light">#FFFFFF</color>
+    <color name="auto_on_surface_variant_light">#000000</color>
+</resources>

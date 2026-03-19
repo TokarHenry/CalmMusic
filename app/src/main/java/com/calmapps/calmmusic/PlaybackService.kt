@@ -21,7 +21,21 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
+import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaLibraryService.MediaLibrarySession
+import androidx.media3.session.LibraryResult
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import com.google.common.collect.ImmutableList
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import android.os.Bundle
+import android.util.Log
+import com.calmapps.calmmusic.data.CalmMusicDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import okhttp3.ConnectionPool
@@ -31,10 +45,17 @@ import java.util.concurrent.TimeUnit
 /**
  * Media3-based playback service.
  */
-class PlaybackService : MediaSessionService() {
-    private var mediaSession: MediaSession? = null
+class PlaybackService : MediaLibraryService() {
+    private var mediaSession: MediaLibrarySession? = null
+    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     companion object {
+        private const val TAG = "PlaybackService"
+        private const val MEDIA_ROOT_ID = "[rootID]"
+        private const val MEDIA_PLAYLISTS_ID = "[playlistsID]"
+        private const val MEDIA_LIBRARY_ID = "[libraryID]"
+        private const val MEDIA_SEARCH_ID = "[searchID]"
+        private const val MEDIA_PLAYLIST_PREFIX = "[playlist]"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "calmmusic_playback_channel"
         private var errorCallback: ((PlaybackException) -> Unit)? = null
@@ -120,7 +141,7 @@ class PlaybackService : MediaSessionService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        mediaSession = MediaSession.Builder(this, player)
+        mediaSession = MediaLibrarySession.Builder(this, player, LibrarySessionCallback())
             .setSessionActivity(sessionActivityPendingIntent)
             .build()
 
@@ -210,7 +231,7 @@ class PlaybackService : MediaSessionService() {
         super.onTaskRemoved(rootIntent)
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
         mediaSession
 
     override fun onDestroy() {
@@ -220,5 +241,263 @@ class PlaybackService : MediaSessionService() {
         }
         mediaSession = null
         super.onDestroy()
+    }
+
+    private inner class LibrarySessionCallback : MediaLibrarySession.Callback {
+        private val playableItemCache = mutableMapOf<String, MediaItem>()
+
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): MediaSession.ConnectionResult {
+            val connectionResult = super.onConnect(session, controller)
+            
+            // Remove the timeline command to disable the Android Auto Queue button natively
+            val playerCommands = connectionResult.availablePlayerCommands.buildUpon()
+                .remove(Player.COMMAND_GET_TIMELINE)
+                .remove(Player.COMMAND_CHANGE_MEDIA_ITEMS)
+                .build()
+                
+            return MediaSession.ConnectionResult.accept(
+                connectionResult.availableSessionCommands,
+                playerCommands
+            )
+        }
+
+        override fun onGetLibraryRoot(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            params: MediaLibraryService.LibraryParams?
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            val rootItem = MediaItem.Builder()
+                .setMediaId(MEDIA_ROOT_ID)
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(getString(R.string.app_name))
+                        .setIsBrowsable(true)
+                        .setIsPlayable(false)
+                        .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
+                        .build()
+                )
+                .build()
+            return Futures.immediateFuture(LibraryResult.ofItem(rootItem, params))
+        }
+
+        override fun onGetChildren(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            parentId: String,
+            page: Int,
+            pageSize: Int,
+            params: MediaLibraryService.LibraryParams?
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            val future = SettableFuture.create<LibraryResult<ImmutableList<MediaItem>>>()
+
+            serviceScope.launch {
+                try {
+                    val children = when {
+                        parentId == MEDIA_ROOT_ID -> getRootChildren()
+                        parentId == MEDIA_PLAYLISTS_ID -> getPlaylistItems()
+                        parentId == MEDIA_LIBRARY_ID -> getLibraryItems()
+                        parentId.startsWith(MEDIA_PLAYLIST_PREFIX) -> {
+                            val playlistId = parentId.removePrefix(MEDIA_PLAYLIST_PREFIX)
+                            getPlaylistTracks(playlistId)
+                        }
+                        else -> ImmutableList.of()
+                    }
+                    future.set(LibraryResult.ofItemList(children, params))
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error getting children for $parentId", e)
+                    future.set(LibraryResult.ofItemList(ImmutableList.of(), params))
+                }
+            }
+            return future
+        }
+
+        override fun onGetItem(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            mediaId: String
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            return Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE))
+        }
+
+        override fun onAddMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: MutableList<MediaItem>
+        ): ListenableFuture<MutableList<MediaItem>> {
+            val future = SettableFuture.create<MutableList<MediaItem>>()
+            serviceScope.launch {
+                try {
+                    val resolved = mediaItems.map { item ->
+                        if (item.localConfiguration != null) {
+                            item
+                        } else {
+                            resolveMediaItem(item.mediaId) ?: item
+                        }
+                    }.toMutableList()
+                    future.set(resolved)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error resolving media items", e)
+                    future.set(mediaItems)
+                }
+            }
+            return future
+        }
+
+        private fun getRootChildren(): ImmutableList<MediaItem> {
+            val playlists = MediaItem.Builder()
+                .setMediaId(MEDIA_PLAYLISTS_ID)
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(getString(R.string.auto_playlists))
+                        .setIsBrowsable(true)
+                        .setIsPlayable(false)
+                        .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS)
+                        .build()
+                )
+                .build()
+
+            val library = MediaItem.Builder()
+                .setMediaId(MEDIA_LIBRARY_ID)
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(getString(R.string.auto_library))
+                        .setIsBrowsable(true)
+                        .setIsPlayable(false)
+                        .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
+                        .build()
+                )
+                .build()
+
+            return ImmutableList.of(playlists, library)
+        }
+
+        private suspend fun getPlaylistItems(): ImmutableList<MediaItem> {
+            try {
+                val database = CalmMusicDatabase.getDatabase(this@PlaybackService)
+                val playlists = database.playlistDao().getAllPlaylists()
+                
+                val items = playlists.map { playlist ->
+                    MediaItem.Builder()
+                        .setMediaId(MEDIA_PLAYLIST_PREFIX + playlist.id)
+                        .setMediaMetadata(
+                            MediaMetadata.Builder()
+                                .setTitle(playlist.name)
+                                .setIsBrowsable(true)
+                                .setIsPlayable(false)
+                                .setMediaType(MediaMetadata.MEDIA_TYPE_PLAYLIST)
+                                .build()
+                        )
+                        .build()
+                }
+                return ImmutableList.copyOf(items)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading playlists", e)
+                return ImmutableList.of()
+            }
+        }
+
+        private suspend fun getPlaylistTracks(playlistId: String): ImmutableList<MediaItem> {
+            try {
+                val database = CalmMusicDatabase.getDatabase(this@PlaybackService)
+                val songs = database.playlistDao().getSongsForPlaylist(playlistId)
+                
+                val items = songs.map { song ->
+                    val item = MediaItem.Builder()
+                        .setMediaId(song.id)
+                        .setUri(song.audioUri.toUri())
+                        .setMediaMetadata(
+                            MediaMetadata.Builder()
+                                .setTitle(song.title)
+                                .setArtist(song.artist)
+                                .setIsBrowsable(false)
+                                .setIsPlayable(true)
+                                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                                .setExtras(Bundle().apply {
+                                    putString("songId", song.id)
+                                    putString("sourceType", song.sourceType)
+                                })
+                                .build()
+                        )
+                        .build()
+                        
+                    playableItemCache[song.id] = item
+                    item
+                }
+                return ImmutableList.copyOf(items)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading playlist tracks", e)
+                return ImmutableList.of()
+            }
+        }
+
+        private suspend fun getLibraryItems(): ImmutableList<MediaItem> {
+            try {
+                val database = CalmMusicDatabase.getDatabase(this@PlaybackService)
+                val songs = database.songDao().getAllSongs()
+                
+                val items = songs.map { song ->
+                    val item = MediaItem.Builder()
+                        .setMediaId(song.id)
+                        .setUri(song.audioUri.toUri())
+                        .setMediaMetadata(
+                            MediaMetadata.Builder()
+                                .setTitle(song.title)
+                                .setArtist(song.artist)
+                                .setIsBrowsable(false)
+                                .setIsPlayable(true)
+                                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                                .setExtras(Bundle().apply {
+                                    putString("songId", song.id)
+                                    putString("sourceType", song.sourceType)
+                                })
+                                .build()
+                        )
+                        .build()
+                        
+                    playableItemCache[song.id] = item
+                    item
+                }
+                return ImmutableList.copyOf(items)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading library items", e)
+                return ImmutableList.of()
+            }
+        }
+
+        private suspend fun resolveMediaItem(mediaId: String): MediaItem? {
+            // Check memory cache first to resolve immediately
+            playableItemCache[mediaId]?.let { return it }
+
+            // Check database fallback
+            try {
+                val database = CalmMusicDatabase.getDatabase(this@PlaybackService)
+                val songs = database.songDao().getAllSongs()
+                val song = songs.find { it.id == mediaId }
+                
+                if (song != null) {
+                    val item = MediaItem.Builder()
+                        .setMediaId(song.id)
+                        .setUri(song.audioUri.toUri())
+                        .setMediaMetadata(
+                            MediaMetadata.Builder()
+                                .setTitle(song.title)
+                                .setArtist(song.artist)
+                                .setIsBrowsable(false)
+                                .setIsPlayable(true)
+                                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                                .build()
+                        )
+                        .build()
+                    playableItemCache[song.id] = item
+                    return item
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error resolving media item for $mediaId", e)
+            }
+            return null
+        }
     }
 }

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android Auto dark theme colors -->
+    <style name="Theme.CalmMusic.Auto" parent="Theme.Material3.Dark">
+        <item name="colorPrimary">@color/auto_primary_dark</item>
+        <item name="colorOnPrimary">@color/auto_on_primary_dark</item>
+        <item name="colorPrimaryContainer">@color/auto_primary_container_dark</item>
+        <item name="colorOnPrimaryContainer">@color/auto_on_primary_container_dark</item>
+        <item name="colorSurface">@color/auto_surface_dark</item>
+        <item name="colorOnSurface">@color/auto_on_surface_dark</item>
+        <item name="colorSurfaceVariant">@color/auto_surface_variant_dark</item>
+        <item name="colorOnSurfaceVariant">@color/auto_on_surface_variant_dark</item>
+    </style>
+
+    <!-- Dark mode colors - strict black and white -->
+    <color name="auto_primary_dark">#FFFFFF</color>
+    <color name="auto_on_primary_dark">#000000</color>
+    <color name="auto_primary_container_dark">#000000</color>
+    <color name="auto_on_primary_container_dark">#FFFFFF</color>
+    <color name="auto_surface_dark">#000000</color>
+    <color name="auto_on_surface_dark">#FFFFFF</color>
+    <color name="auto_surface_variant_dark">#000000</color>
+    <color name="auto_on_surface_variant_dark">#FFFFFF</color>
+</resources>
