@@ -1,4 +1,6 @@
-    <string name="app_name">CalmMusic</string>
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CalmMusic Auto</string>
     
     <!-- Android Auto browse nodes -->
     <string name="auto_playlists">Playlists</string>

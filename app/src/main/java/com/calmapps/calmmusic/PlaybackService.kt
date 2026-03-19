@@ -8,6 +8,8 @@ import android.content.Intent
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -20,12 +22,10 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.DefaultMediaNotificationProvider
-import androidx.media3.session.MediaSession
+import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
-import androidx.media3.session.LibraryResult
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
+import androidx.media3.session.MediaSession
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -51,13 +51,16 @@ class PlaybackService : MediaLibraryService() {
 
     companion object {
         private const val TAG = "PlaybackService"
+        private const val NOTIFICATION_ID = 1001
+        private const val CHANNEL_ID = "calmmusic_playback_channel"
+        
+        // Android Auto Media Tree IDs
         private const val MEDIA_ROOT_ID = "[rootID]"
         private const val MEDIA_PLAYLISTS_ID = "[playlistsID]"
         private const val MEDIA_LIBRARY_ID = "[libraryID]"
         private const val MEDIA_SEARCH_ID = "[searchID]"
-        private const val MEDIA_PLAYLIST_PREFIX = "[playlist]"
-        private const val NOTIFICATION_ID = 1001
-        private const val CHANNEL_ID = "calmmusic_playback_channel"
+        private const val MEDIA_PLAYLIST_PREFIX = "[pl]"
+
         private var errorCallback: ((PlaybackException) -> Unit)? = null
 
         private const val NEWPIPE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"
@@ -242,8 +245,11 @@ class PlaybackService : MediaLibraryService() {
         mediaSession = null
         super.onDestroy()
     }
+    
+    // ==================== MediaLibrarySession.Callback ====================
 
     private inner class LibrarySessionCallback : MediaLibrarySession.Callback {
+        private var searchResults: List<MediaItem> = emptyList()
         private val playableItemCache = mutableMapOf<String, MediaItem>()
 
         override fun onConnect(

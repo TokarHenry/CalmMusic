@@ -9,7 +9,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.calmapps.calmmusic"
+        applicationId = "com.calmapps.calmmusic.auto"
         minSdk = 28
         targetSdk = 35
         versionCode = 11
@@ -59,6 +59,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
     implementation("androidx.activity:activity-compose:1.8.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("com.google.android.material:material:1.12.0")
 
     // Apple MusicKit for Android
     implementation(files("libs/musickitauth-release-1.1.2.aar"))
